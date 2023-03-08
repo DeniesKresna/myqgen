@@ -3,15 +3,15 @@ package main
 import (
 	"fmt"
 
-	"github.com/DeniesKresna/gohelper/utlog"
 	"github.com/DeniesKresna/myqgen/qgen"
 )
 
 func main() {
 	listTableColumn := map[string]map[string]string{
 		"user": {
-			"userID":   "users.id",
-			"userName": "users.name",
+			"userID":        "users.id",
+			"userFirstName": "users.first_name",
+			"userLastName":  "users.last_name",
 		},
 		"expert": {
 			"expertID":     "experts.id",
@@ -31,40 +31,38 @@ func main() {
 	}
 
 	query := `SELECT
+				__!distinct__
 				<view::user />
 				<view::{
 					userIdentity > identity: :user.userName;
-					userFirstName > firstname: "testdoang";
+					userFirstName > firstname: "users.first_name";
 				} />
 				FROM
 				<tb:user />
 				<join:expert{
-					cond: "__::@.userID__ = __::user.userID__ ";
+					cond: "__::@.expertUserID__ = __::user.userID__ ";
 					value: LEFT JOIN;
 				} />
 				WHERE
 				<cond:id[user.userID] /> AND
-				<cond:userName[user.userName] />
+				<cond:firstName[user.userFirstName] />
+				__!limit__
+				__!offset__
 	`
 
 	args := qgen.Args{
 		Fields: []string{
-			"userID",
-			"userName",
 			"userIdentity",
-			"userFirstName",
+			"user*",
 		},
 		Conditions: map[string]interface{}{
-			"id":            5,
-			"userName:LIKE": "%as%",
+			"id":             74,
+			"firstName:LIKE": "%ar%",
 		},
+		Limit: 3,
 	}
 
-	res, err := qGenObj.Generate(query, args)
-	if err != nil {
-		utlog.Error(err)
-		return
-	}
+	res := qGenObj.Build(query, args)
 
 	fmt.Println(res)
 	return

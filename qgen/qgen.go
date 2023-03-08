@@ -42,18 +42,29 @@ var subSuffixLength = len(SUB_SUFFIX)
 type Args struct {
 	Offset     int64
 	Limit      int
-	Sorting    []string
+	Sorting    string
 	Conditions map[string]interface{}
 	Fields     []string
 	Groups     []string
+	Distinct   bool
 }
 
 type Obj struct {
 	ListTableColumn map[string]map[string]string
 	ListTable       map[string]string
+	IsLogged        bool
 }
 
-func (q *Obj) RegisStruct(tables []interface{}) (err error) {
+func InitObject(isLogged bool, tables ...interface{}) (obj *Obj, err error) {
+	obj = &Obj{
+		ListTableColumn: make(map[string]map[string]string),
+		ListTable:       make(map[string]string),
+	}
+	var (
+		listTable       = make(map[string]string)
+		listTableColumn = make(map[string]map[string]string)
+	)
+
 	for _, tbSt := range tables {
 		var tbVal = reflect.ValueOf(tbSt)
 		if !utinterface.IsStruct(tbVal) {
@@ -65,21 +76,16 @@ func (q *Obj) RegisStruct(tables []interface{}) (err error) {
 			tbName, tbAlias string
 		)
 
-		tbNameRes := tbVal.MethodByName("GetTableName").Call([]reflect.Value{})
+		tbNameRes := tbVal.MethodByName("GetTableNameAndAlias").Call([]reflect.Value{})
 		tbName = tbNameRes[0].Interface().(string)
-		if len(tbNameRes) < 1 && tbNameRes[0].Interface().(string) == "" {
-			err = errors.New("Error when get table name")
+		tbAlias = tbNameRes[1].Interface().(string)
+		if len(tbNameRes) < 2 && tbName == "" && tbAlias == "" {
+			err = errors.New("Error when get table name and alias")
 			return
 		}
 
-		tbAliasRes := tbVal.MethodByName("GetTableAlias").Call([]reflect.Value{})
-		tbAlias = tbAliasRes[0].Interface().(string)
-		if len(tbAliasRes) < 1 && tbAliasRes[0].Interface().(string) == "" {
-			err = errors.New("Error when get table alias")
-			return
-		}
-
-		q.ListTable[tbAlias] = tbName
+		listTable[tbAlias] = tbName
+		listTableColumn[tbAlias] = make(map[string]string)
 
 		var reflectType = tbVal.Type()
 
@@ -88,28 +94,55 @@ func (q *Obj) RegisStruct(tables []interface{}) (err error) {
 			fieldTags := reflectType.Field(i).Tag
 
 			sqlqTagStr := fieldTags.Get("sqlq")
-			sqlqTags := strings.Split(sqlqTagStr, ",")
-			if len(sqlqTagStr) <= 1 {
-				err = errors.New(fmt.Sprintf("Should has sqlq tag in field: %s", fieldName))
-				return
+			if fieldName == "Active" {
+				fmt.Printf("sqlqTagStr: %s", sqlqTagStr)
 			}
+			if len(sqlqTagStr) <= 1 || sqlqTagStr == "" {
+				continue
+			}
+			sqlqTags := strings.Split(sqlqTagStr, ",")
+
 			sqlqTag := sqlqTags[0]
 
-			dbTagStr := fieldTags.Get("db")
-			dbTags := strings.Split(dbTagStr, ",")
-			if len(dbTagStr) <= 1 {
-				err = errors.New(fmt.Sprintf("Should has db tag in field: %s", fieldName))
-				return
+			dbTagStr := fieldTags.Get("jsondb")
+			dbTag := ""
+			if dbTagStr != "" {
+				dbTags := strings.Split(dbTagStr, ",")
+				if len(dbTags) > 0 {
+					dbTag = dbTags[0]
+				}
+				childList := strings.Split(dbTag, ".")
+				if len(childList) > 1 {
+					for idx, v := range childList {
+						if idx == 0 {
+							dbTag = fmt.Sprintf("`%s`->>'$", v)
+							continue
+						}
+						dbTag += fmt.Sprintf(".%s", v)
+					}
+					dbTag += "'"
+				}
+			} else {
+				dbTagStr = fieldTags.Get("db")
+				dbTags := strings.Split(dbTagStr, ",")
+				if len(dbTags) > 0 {
+					dbTag = dbTags[0]
+				}
 			}
-			dbTag := dbTags[0]
 
-			q.ListTableColumn[tbAlias][sqlqTag] = fmt.Sprintf("%s.%s", tbName, dbTag)
+			if dbTag != "" {
+				listTableColumn[tbAlias][sqlqTag] = fmt.Sprintf("%s.%s", tbName, dbTag)
+			}
 		}
 	}
+	obj.ListTableColumn = listTableColumn
+	obj.ListTable = listTable
+	obj.IsLogged = isLogged
+
 	return
 }
 
-func (q *Obj) HandleGenerateViewTag(query string, args Args, isEndView bool) (res string, err error) {
+func (q *Obj) HandleGenerateViewTag(query string, args Args) (res string, err error) {
 	lastIndex := len(query)
 	viewVar := strings.Split(query, "::")
 
@@ -124,10 +157,6 @@ func (q *Obj) HandleGenerateViewTag(query string, args Args, isEndView bool) (re
 	if ok {
 		for _, f := range args.Fields {
 			if val, ok2 := listColumn[f]; ok2 {
-				if isEndView {
-					res += fmt.Sprintf("%s ", val)
-					return
-				}
 				res += fmt.Sprintf("%s, ", val)
 			}
 		}
@@ -135,7 +164,7 @@ func (q *Obj) HandleGenerateViewTag(query string, args Args, isEndView bool) (re
 	return
 }
 
-func (q *Obj) HandleGenerateViewCurly(query string, args Args, isEndView bool) (res string, err error) {
+func (q *Obj) HandleGenerateViewCurly(query string, args Args) (res string, err error) {
 	viewVar := strings.Split(query, "::")
 
 	if len(viewVar) < 2 {
@@ -151,7 +180,7 @@ func (q *Obj) HandleGenerateViewCurly(query string, args Args, isEndView bool) (
 
 	cols := strings.Split(colList, COL_SEP)
 
-	for idx, col := range cols {
+	for _, col := range cols {
 		col = strings.TrimSpace(col)
 		if col == "" {
 			continue
@@ -184,14 +213,6 @@ func (q *Obj) HandleGenerateViewCurly(query string, args Args, isEndView bool) (
 		}
 
 		if strings.HasPrefix(colVal, `"`) && strings.HasSuffix(colVal, `"`) {
-			if isEndView {
-				if idx+2 <= len(cols) {
-					if cols[idx+1] == "" {
-						res += fmt.Sprintf("%s AS %s ", strings.TrimSpace(colVal[1:len(colVal)-1]), colAlias)
-						continue
-					}
-				}
-			}
 			res += fmt.Sprintf("%s AS %s, ", strings.TrimSpace(colVal[1:len(colVal)-1]), colAlias)
 		} else {
 			colValDes := strings.Split(colVal, ".")
@@ -212,14 +233,6 @@ func (q *Obj) HandleGenerateViewCurly(query string, args Args, isEndView bool) (
 			}
 
 			if val, ok3 := tbCol[colValDes[1]]; ok3 {
-				if isEndView {
-					if idx+2 <= len(cols) {
-						if cols[idx+1] == "" {
-							res += fmt.Sprintf("%s AS %s ", val, colAlias)
-							continue
-						}
-					}
-				}
 				res += fmt.Sprintf("%s AS %s, ", val, colAlias)
 			}
 		}
@@ -364,7 +377,64 @@ func (q *Obj) HandleGenerateCondPlain(query string, condFieldList map[string]str
 	return
 }
 
-func (q *Obj) Generate(query string, args Args) (res string, err error) {
+func (q *Obj) ResolveFinishing(query string, args Args) (res string, err error) {
+	res = query
+	sent := regexp.MustCompile(TABLE_VAR)
+	matches := sent.FindAllStringSubmatchIndex(query, -1)
+
+	var varsMap = make(map[string]string)
+	for _, v := range matches {
+		theVar := query[v[0]:v[1]]
+		theVarDes := strings.Split(theVar, ".")
+		tbAlias := theVarDes[0][4:]
+		_, ok := q.ListTable[tbAlias]
+		if !ok {
+			err = errors.New(fmt.Sprintf("Table %s not found", tbAlias))
+			return
+		}
+
+		colAlias := theVarDes[1][:len(theVarDes[1])-2]
+		col, ok1 := q.ListTableColumn[tbAlias][colAlias]
+		if !ok1 {
+			fmt.Printf("q.ListTableColumn[%s]: %+v\n", tbAlias, q.ListTableColumn[tbAlias])
+			err = errors.New(fmt.Sprintf("Column %s not found", colAlias))
+			return
+		}
+
+		if _, ok2 := varsMap[theVar]; !ok2 {
+			varsMap[theVar] = fmt.Sprintf("%s", col)
+			res = strings.ReplaceAll(res, theVar, varsMap[theVar])
+		}
+	}
+
+	res = strings.ReplaceAll(res, ", FROM ", " FROM ")
+
+	if args.Distinct {
+		res = strings.ReplaceAll(res, "__!distinct__", "DISTINCT")
+	} else {
+		res = strings.ReplaceAll(res, "__!distinct__", "")
+	}
+
+	if args.Limit >= 0 {
+		res = strings.ReplaceAll(res, "__!limit__", fmt.Sprintf("LIMIT %d", args.Limit))
+	} else {
+		res = strings.ReplaceAll(res, "__!limit__", "")
+	}
+
+	if args.Offset > 0 && args.Limit != 0 {
+		res = strings.ReplaceAll(res, "__!offset__", fmt.Sprintf("OFFSET %d", args.Offset))
+	} else {
+		res = strings.ReplaceAll(res, "__!offset__", "")
+	}
+
+	if q.IsLogged {
+		fmt.Printf("SQL DEBUG: \n%s\n", res)
+	}
+
+	return
+}
+
+func (q *Obj) Build(query string, args Args) (res string) {
 	regexPatterns := map[string]string{
 		"viewDefault": VIEW_DEFAULT,
 		"viewCurly":   VIEW_CURLY,
@@ -374,7 +444,14 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 		"condModif":   COND_MODIF,
 	}
 
-	var matchMap = make(map[int]map[string]interface{})
+	if args.Limit <= 0 {
+		args.Limit = -1
+	}
+
+	var (
+		matchMap = make(map[int]map[string]interface{})
+		err      error
+	)
 
 	for tagType, pattern := range regexPatterns {
 		sent := regexp.MustCompile(pattern)
@@ -410,6 +487,33 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 			i = val["range"].([]int)[1]
 		}
 	}
+	if recordFlag {
+		matchMap[earlyIdx] = map[string]interface{}{
+			"type":  "free",
+			"range": query[earlyIdx:],
+		}
+	}
+
+	for k, v := range args.Fields {
+		if strings.HasSuffix(v, "*") {
+			starIndex := strings.Index(v, "*")
+			tbAlias := v[:starIndex]
+			tbAlias = strings.TrimSpace(tbAlias)
+
+			ltc := q.ListTableColumn[tbAlias]
+
+			ix := 0
+			for k2, v2 := range ltc {
+				_ = v2
+				if ix == 0 {
+					args.Fields[k] = k2
+				} else {
+					args.Fields = append(args.Fields, k2)
+				}
+				ix++
+			}
+		}
+	}
 
 	var condFieldList = make(map[string]string)
 	for k, v := range args.Conditions {
@@ -417,11 +521,11 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 		condVarLen := len(condVar)
 		if condVarLen == 1 {
 			if _, ok := condFieldList[condVar[0]]; !ok {
-				condFieldList[condVar[0]] = "= " + ConvertToString(v, "")
+				condFieldList[condVar[0]] = "= " + ConvertToEscapeString(v, "")
 			}
 		} else if condVarLen == 2 {
 			if _, ok := condFieldList[condVar[0]]; !ok {
-				condFieldList[condVar[0]] = strings.ToUpper(condVar[1]) + " " + ConvertToString(v, "")
+				condFieldList[condVar[0]] = strings.ToUpper(condVar[1]) + " " + ConvertToEscapeString(v, "")
 			}
 		}
 	}
@@ -434,29 +538,14 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 
 	sort.Ints(listKey)
 
-	for idx, v := range listKey {
+	for _, v := range listKey {
 		mat := matchMap[v]
 		switch mat["type"].(string) {
 		case "viewDefault":
 			rng := mat["range"].([]int)
-			var (
-				resf      string
-				isEndView bool
-			)
+			var resf string
 
-			if idx+2 <= len(listKey) {
-				nexMat := matchMap[listKey[idx+1]]
-				tagGroup := nexMat["type"].(string)
-				if tagGroup == "free" {
-					vl := strings.ToLower(strings.TrimSpace(nexMat["range"].(string)))
-
-					if strings.HasPrefix(vl, "from") {
-						isEndView = true
-					}
-				}
-			}
-
-			resf, err = q.HandleGenerateViewTag(query[rng[0]:rng[1]], args, isEndView)
+			resf, err = q.HandleGenerateViewTag(query[rng[0]:rng[1]], args)
 			if err != nil {
 				utlog.Error(err)
 				return
@@ -464,24 +553,9 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 			res += resf
 		case "viewCurly":
 			rng := mat["range"].([]int)
-			var (
-				resf      string
-				isEndView bool
-			)
+			var resf string
 
-			if idx+2 <= len(listKey) {
-				nexMat := matchMap[listKey[idx+1]]
-				tagGroup := nexMat["type"].(string)
-				if tagGroup == "free" {
-					vl := strings.ToLower(strings.TrimSpace(nexMat["range"].(string)))
-
-					if strings.HasPrefix(vl, "from") {
-						isEndView = true
-					}
-				}
-			}
-
-			resf, err = q.HandleGenerateViewCurly(query[rng[0]:rng[1]], args, isEndView)
+			resf, err = q.HandleGenerateViewCurly(query[rng[0]:rng[1]], args)
 			if err != nil {
 				utlog.Error(err)
 				return
@@ -520,6 +594,11 @@ func (q *Obj) Generate(query string, args Args) (res string, err error) {
 	}
 
 	res = strings.Join(strings.Fields(res), " ")
+	res, err = q.ResolveFinishing(res, args)
+	if err != nil {
+		utlog.Error(err)
+		return
+	}
 
 	return
 }

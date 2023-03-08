@@ -1,10 +1,8 @@
 module github.com/DeniesKresna/myqgen
 
-replace github.com/DeniesKresna/gohelper => ../helper
-
 go 1.18
 
-require github.com/DeniesKresna/gohelper v0.0.0-00010101000000-000000000000
+require github.com/DeniesKresna/gohelper v0.0.0-20230308104657-fed31a4c76ec
 
 require (
 	github.com/mattn/go-colorable v0.1.12 // indirect
