@@ -65,5 +65,31 @@ func main() {
 	res := qGenObj.Build(query, args)
 
 	fmt.Println(res)
+	fmt.Printf("\n")
+
+	query2 := `UPDATE
+					<tb:user />
+				SET
+					<set::user />
+				WHERE
+				<cond:id[user.userID] /> AND
+				<cond:firstName[user.userFirstName] />
+	`
+
+	args2 := qgen.Args{
+		UpdateFields: map[string]interface{}{
+			"userFirstName": "administrator",
+			"userLastName":  "hebat",
+		},
+		Conditions: map[string]interface{}{
+			"id":             74,
+			"firstName:LIKE": "%ar%",
+		},
+	}
+
+	res2 := qGenObj.Build(query2, args2)
+
+	fmt.Println(res2)
+
 	return
 }

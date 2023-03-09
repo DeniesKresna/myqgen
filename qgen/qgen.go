@@ -17,6 +17,7 @@ import (
 const (
 
 	// tags
+	SET_PREFIX   = "<set::"
 	VIEW_PREFIX  = "<view::"
 	COND_PREFIX  = "<cond::"
 	TABLE_PREFIX = "<tb:"
@@ -40,13 +41,14 @@ var tagSuffixLength = len(TAG_SUFFIX)
 var subSuffixLength = len(SUB_SUFFIX)
 
 type Args struct {
-	Offset     int64
-	Limit      int
-	Sorting    string
-	Conditions map[string]interface{}
-	Fields     []string
-	Groups     []string
-	Distinct   bool
+	Offset       int64
+	Limit        int
+	Sorting      string
+	Conditions   map[string]interface{}
+	Fields       []string
+	Groups       []string
+	Distinct     bool
+	UpdateFields map[string]interface{}
 }
 
 type Obj struct {
@@ -90,13 +92,9 @@ func InitObject(isLogged bool, tables ...interface{}) (obj *Obj, err error) {
 		var reflectType = tbVal.Type()
 
 		for i := 0; i < reflectType.NumField(); i++ {
-			fieldName := reflectType.Field(i).Name
 			fieldTags := reflectType.Field(i).Tag
 
 			sqlqTagStr := fieldTags.Get("sqlq")
-			if fieldName == "Active" {
-				fmt.Printf("sqlqTagStr: %s", sqlqTagStr)
-			}
 			if len(sqlqTagStr) <= 1 || sqlqTagStr == "" {
 				continue
 			}
@@ -139,6 +137,32 @@ func InitObject(isLogged bool, tables ...interface{}) (obj *Obj, err error) {
 	obj.ListTable = listTable
 	obj.IsLogged = isLogged
 
+	return
+}
+
+func (q *Obj) HandleGenerateSetTag(query string, args Args) (res string, err error) {
+	lastIndex := len(query)
+	viewVar := strings.Split(query, "::")
+
+	if len(viewVar) < 2 {
+		err = errors.New("Set tag should has table or column alias")
+		return
+	}
+
+	tb := query[len(SET_PREFIX) : lastIndex-len(TAG_SUFFIX)]
+	tb = strings.TrimSpace(tb)
+	listColumn, ok := q.ListTableColumn[tb]
+	if ok {
+		var hasSet = make(map[string]bool)
+		for key, uf := range args.UpdateFields {
+			if val, ok2 := listColumn[key]; ok2 {
+				if _, ok3 := hasSet[val]; !ok3 {
+					res += fmt.Sprintf("%s = %v, ", val, ConvertToEscapeString(uf, ""))
+					hasSet[val] = true
+				}
+			}
+		}
+	}
 	return
 }
 
@@ -396,7 +420,6 @@ func (q *Obj) ResolveFinishing(query string, args Args) (res string, err error) 
 		colAlias := theVarDes[1][:len(theVarDes[1])-2]
 		col, ok1 := q.ListTableColumn[tbAlias][colAlias]
 		if !ok1 {
-			fmt.Printf("q.ListTableColumn[%s]: %+v\n", tbAlias, q.ListTableColumn[tbAlias])
 			err = errors.New(fmt.Sprintf("Column %s not found", colAlias))
 			return
 		}
@@ -408,6 +431,7 @@ func (q *Obj) ResolveFinishing(query string, args Args) (res string, err error) 
 	}
 
 	res = strings.ReplaceAll(res, ", FROM ", " FROM ")
+	res = strings.ReplaceAll(res, ", WHERE ", " WHERE ")
 
 	if args.Distinct {
 		res = strings.ReplaceAll(res, "__!distinct__", "DISTINCT")
@@ -442,6 +466,7 @@ func (q *Obj) Build(query string, args Args) (res string) {
 		"join":        JOIN,
 		"condPlain":   COND_PLAIN,
 		"condModif":   COND_MODIF,
+		"setDefault":  SET_DEFAULT,
 	}
 
 	if args.Limit <= 0 {
@@ -583,6 +608,16 @@ func (q *Obj) Build(query string, args Args) (res string) {
 			rng := mat["range"].([]int)
 			var resf string
 			resf, err = q.HandleGenerateCondPlain(query[rng[0]:rng[1]], condFieldList)
+			if err != nil {
+				utlog.Error(err)
+				return
+			}
+			res += resf
+		case "setDefault":
+			rng := mat["range"].([]int)
+			var resf string
+
+			resf, err = q.HandleGenerateSetTag(query[rng[0]:rng[1]], args)
 			if err != nil {
 				utlog.Error(err)
 				return
