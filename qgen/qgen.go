@@ -369,6 +369,7 @@ func (q *Obj) HandleGenerateCondPlain(query string, condFieldList map[string]str
 	fieldFilter, fieldColumn := fields[0], fields[1]
 	condition, ok := condFieldList[fieldFilter]
 	if !ok {
+		res += "TRUE "
 		return
 	}
 
