@@ -43,7 +43,7 @@ var subSuffixLength = len(SUB_SUFFIX)
 type Args struct {
 	Offset       int64
 	Limit        int
-	Sorting      string
+	Sorting      []string
 	Conditions   map[string]interface{}
 	Fields       []string
 	Groups       []string
@@ -166,7 +166,9 @@ func (q *Obj) HandleGenerateSetTag(query string, args Args) (res string, err err
 	return
 }
 
-func (q *Obj) HandleGenerateViewTag(query string, args Args) (res string, err error) {
+func (q *Obj) HandleGenerateViewTag(query string, args Args) (res string, additionalField map[string]string, err error) {
+	additionalField = make(map[string]string)
+
 	lastIndex := len(query)
 	viewVar := strings.Split(query, "::")
 
@@ -178,6 +180,9 @@ func (q *Obj) HandleGenerateViewTag(query string, args Args) (res string, err er
 	tb := query[len(VIEW_PREFIX) : lastIndex-len(TAG_SUFFIX)]
 	tb = strings.TrimSpace(tb)
 	listColumn, ok := q.ListTableColumn[tb]
+	for k, v := range q.ListTableColumn[tb] {
+		additionalField[k] = v
+	}
 	if ok {
 		for _, f := range args.Fields {
 			if val, ok2 := listColumn[f]; ok2 {
@@ -188,7 +193,9 @@ func (q *Obj) HandleGenerateViewTag(query string, args Args) (res string, err er
 	return
 }
 
-func (q *Obj) HandleGenerateViewCurly(query string, args Args) (res string, err error) {
+func (q *Obj) HandleGenerateViewCurly(query string, args Args) (res string, additionalField map[string]string, err error) {
+	additionalField = make(map[string]string)
+
 	viewVar := strings.Split(query, "::")
 
 	if len(viewVar) < 2 {
@@ -238,6 +245,7 @@ func (q *Obj) HandleGenerateViewCurly(query string, args Args) (res string, err 
 
 		if strings.HasPrefix(colVal, `"`) && strings.HasSuffix(colVal, `"`) {
 			res += fmt.Sprintf("%s AS %s, ", strings.TrimSpace(colVal[1:len(colVal)-1]), colAlias)
+			additionalField[colField] = colAlias
 		} else {
 			colValDes := strings.Split(colVal, ".")
 			if len(colValDes) != 2 {
@@ -258,6 +266,7 @@ func (q *Obj) HandleGenerateViewCurly(query string, args Args) (res string, err 
 
 			if val, ok3 := tbCol[colValDes[1]]; ok3 {
 				res += fmt.Sprintf("%s AS %s, ", val, colAlias)
+				additionalField[colField] = colAlias
 			}
 		}
 	}
@@ -402,7 +411,7 @@ func (q *Obj) HandleGenerateCondPlain(query string, condFieldList map[string]str
 	return
 }
 
-func (q *Obj) ResolveFinishing(query string, args Args) (res string, err error) {
+func (q *Obj) ResolveFinishing(query string, args Args, additionalField map[string]string) (res string, err error) {
 	res = query
 	sent := regexp.MustCompile(TABLE_VAR)
 	matches := sent.FindAllStringSubmatchIndex(query, -1)
@@ -450,6 +459,32 @@ func (q *Obj) ResolveFinishing(query string, args Args) (res string, err error) 
 		res = strings.ReplaceAll(res, "__!offset__", fmt.Sprintf("OFFSET %d", args.Offset))
 	} else {
 		res = strings.ReplaceAll(res, "__!offset__", "")
+	}
+
+	if len(args.Sorting) > 0 {
+		sortRes := "ORDER BY"
+		for idx, v := range args.Sorting {
+			isDesc := false
+			if strings.HasPrefix(v, "-") {
+				isDesc = true
+			}
+			v = strings.TrimPrefix(v, "-")
+			realField, ok := additionalField[v]
+			if ok {
+				sortRes += fmt.Sprintf(" %s ", realField)
+				if isDesc {
+					sortRes += "DESC"
+				} else {
+					sortRes += "ASC"
+				}
+				if idx < len(args.Sorting)-1 {
+					sortRes += ","
+				}
+			}
+		}
+		res = strings.ReplaceAll(res, "__!sort__", sortRes)
+	} else {
+		res = strings.ReplaceAll(res, "__!sort__", "")
 	}
 
 	if q.IsLogged {
@@ -564,28 +599,46 @@ func (q *Obj) Build(query string, args Args) (res string) {
 
 	sort.Ints(listKey)
 
+	var additionalField = make(map[string]string)
+
 	for _, v := range listKey {
 		mat := matchMap[v]
 		switch mat["type"].(string) {
 		case "viewDefault":
 			rng := mat["range"].([]int)
-			var resf string
+			var (
+				resf      string
+				addFields map[string]string
+			)
 
-			resf, err = q.HandleGenerateViewTag(query[rng[0]:rng[1]], args)
+			resf, addFields, err = q.HandleGenerateViewTag(query[rng[0]:rng[1]], args)
 			if err != nil {
 				utlog.Error(err)
 				return
 			}
+
+			for k2, v2 := range addFields {
+				additionalField[k2] = v2
+			}
+
 			res += resf
 		case "viewCurly":
 			rng := mat["range"].([]int)
-			var resf string
+			var (
+				resf      string
+				addFields map[string]string
+			)
 
-			resf, err = q.HandleGenerateViewCurly(query[rng[0]:rng[1]], args)
+			resf, addFields, err = q.HandleGenerateViewCurly(query[rng[0]:rng[1]], args)
 			if err != nil {
 				utlog.Error(err)
 				return
 			}
+
+			for k2, v2 := range addFields {
+				additionalField[k2] = v2
+			}
+
 			res += resf
 		case "table":
 			rng := mat["range"].([]int)
@@ -630,7 +683,7 @@ func (q *Obj) Build(query string, args Args) (res string) {
 	}
 
 	res = strings.Join(strings.Fields(res), " ")
-	res, err = q.ResolveFinishing(res, args)
+	res, err = q.ResolveFinishing(res, args, additionalField)
 	if err != nil {
 		utlog.Error(err)
 		return

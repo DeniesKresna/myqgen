@@ -35,7 +35,7 @@ func main() {
 				<view::user />
 				<view::{
 					userIdentity > identity: :user.userName;
-					userFirstName > firstname: "users.first_name";
+					userFullName > firstname: "users.first_name + user.last_name";
 				} />
 				FROM
 				<tb:user />
@@ -46,20 +46,22 @@ func main() {
 				WHERE
 				<cond:id[user.userID] /> AND
 				<cond:firstName[user.userFirstName] />
+				__!sort__
 				__!limit__
 				__!offset__
 	`
 
 	args := qgen.Args{
 		Fields: []string{
-			"userIdentity",
+			"userFullName",
 			"user*",
 		},
 		Conditions: map[string]interface{}{
 			"id":             74,
 			"firstName:LIKE": "%ar%",
 		},
-		Limit: 3,
+		Sorting: []string{"-userID"},
+		Limit:   3,
 	}
 
 	res := qGenObj.Build(query, args)
