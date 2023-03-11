@@ -149,6 +149,7 @@ func (q *Obj) HandleGenerateSetTag(query string, args Args) (res string, err err
 		return
 	}
 
+	var jsonFieldMap = make(map[string]string)
 	tb := query[len(SET_PREFIX) : lastIndex-len(TAG_SUFFIX)]
 	tb = strings.TrimSpace(tb)
 	listColumn, ok := q.ListTableColumn[tb]
@@ -157,12 +158,42 @@ func (q *Obj) HandleGenerateSetTag(query string, args Args) (res string, err err
 		for key, uf := range args.UpdateFields {
 			if val, ok2 := listColumn[key]; ok2 {
 				if _, ok3 := hasSet[val]; !ok3 {
+					if strings.Contains(val, "->") {
+						if _, ok4 := jsonFieldMap[key]; !ok4 {
+							jsonFieldMap[key] = val
+							continue
+						}
+					}
 					res += fmt.Sprintf("%s = %v, ", val, ConvertToEscapeString(uf, ""))
 					hasSet[val] = true
 				}
 			}
 		}
 	}
+
+	if len(jsonFieldMap) > 0 {
+		var jsonSet = make(map[string]string)
+		for key, realField := range jsonFieldMap {
+			jsonStructure := strings.Split(realField, "->>")
+			rootCol := strings.ReplaceAll(jsonStructure[0], "`", "")
+
+			var tmpRes string
+			if _, ok1 := jsonSet[rootCol]; !ok1 {
+				tmpRes = fmt.Sprintf("%s = JSON_SET( %s", rootCol, rootCol)
+			}
+
+			tmpRes += fmt.Sprintf(", %s, %s", jsonStructure[1], ConvertToEscapeString(args.UpdateFields[key], ""))
+			jsonSet[rootCol] = jsonSet[rootCol] + tmpRes
+		}
+
+		for _, v := range jsonSet {
+			if v == "" {
+				continue
+			}
+			res += fmt.Sprintf("%s),", v)
+		}
+	}
+
 	return
 }
 

@@ -13,7 +13,14 @@ func ConvertToEscapeString(obj interface{}, def string) (res string) {
 	case time.Time:
 		res = (obj.(time.Time)).Format("2006-01-02 15:04:05")
 	case string:
-		res = strconv.Quote(fmt.Sprintf("%v", v))
+		switch v {
+		case "__jsonNOW()__":
+			res = "DATE_FORMAT(NOW(), '%Y-%m-%dT%TZ')"
+		case "__NOW()__":
+			res = "NOW()"
+		default:
+			res = strconv.Quote(fmt.Sprintf("%v", v))
+		}
 	case []string:
 		res = "( "
 		data := obj.([]string)
