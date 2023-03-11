@@ -513,6 +513,9 @@ func (q *Obj) ResolveFinishing(query string, args Args, additionalField map[stri
 				}
 			}
 		}
+		if strings.TrimSpace(sortRes) == "ORDER BY" {
+			res = strings.ReplaceAll(res, "__!sort__", "")
+		}
 		res = strings.ReplaceAll(res, "__!sort__", sortRes)
 	} else {
 		res = strings.ReplaceAll(res, "__!sort__", "")

@@ -74,7 +74,7 @@ func ConvertToEscapeString(obj interface{}, def string) (res string) {
 
 const (
 	VIEW_DEFAULT = `\<view::[\w_]*\s?\/\>`
-	VIEW_CURLY   = `\<view::\s*\{[\n\s\w\.\>\<\"\:\;\_\(\)\+\=\,]*\}[\s\n]?\/\>`
+	VIEW_CURLY   = `\<view::\s*\{[\n\s\w\.\>\<\"\:\;\_\(\)\+\=\,\*\']*\}[\s\n]?\/\>`
 	TABLE        = `\<tb\:[\w_]+\s*\/\>`
 	JOIN         = `\<join\:[\w_]+[\s\n]*\{[\_\:\@\.\w\s\n\=\'\"\;\,]*\}[\s\n]*\/\>`
 	DOB_QUOTE    = `\"[\_\:\@\.\w\s\n\=]*\"`
