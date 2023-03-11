@@ -113,9 +113,7 @@ You can use whatever mysql executer package you want.
 * <view::"table Alias" /> table alias is the alias will be used in the logical code. it refer to alias you set in ```GetTableNameAndAlias``` method
   table columns will be selected in query as long you put in args.Fields based on sqlq tag in the struct. (see code above)
 * in this pattern 
-```<view::{
-				"fieldChosen" > "alias in query": :"sqlq column";
-		} />```
+```<view::{ "fieldChosen" > "alias in query": :"sqlq column"; } />```
     you can include this column if you set the "field Chosen" in args.Field as well.
 * for <cond:id[user.userID] /> same with fields, table columns will be used to filter in query as long you put in args.Conditions based on sqlq tag in the struct. (see code above)
 * for another operator condition you can use pattern like this example. ```"id:>": 1,``` or ```"id:IN": []int{1,2,3}```
