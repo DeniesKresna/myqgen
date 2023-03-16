@@ -79,6 +79,9 @@ const GetUser = `
 		`
 ```
 for helping you work in vs code you can install [sqlq](https://marketplace.visualstudio.com/items?itemName=GearIntellix.vscode-sqml) package by GearIntellix
+this is the screnshot of the query with sqlq extension
+<img width="571" alt="Screen Shot 2023-03-16 at 21 36 47" src="https://user-images.githubusercontent.com/37734488/225651460-4cf56059-ec88-4fa1-bb8d-8b8992e4a4a9.png">
+
 * Use the q object in wherever part you want.
 ```
 query := r.q.Build(queries.GetUser, qgen.Args{
